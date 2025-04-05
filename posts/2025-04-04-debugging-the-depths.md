@@ -13,7 +13,7 @@ Tianyi encouraged me to write this, pointing out that it’s not just about solv
 
 ## The Obvious Problem: ERC20 Transfer Goes Haywire
 
-As stated in issue #306, `erc20` transfer test fails with `"Insufficient balance"` despite storage showing correct balance value. Yet, during the transfer execution, it behaved as if the sender didn’t have enough tokens (broke, but that wasn't the case)
+As stated in [Issue #306](https://github.com/zink-lang/zink/issues/306), the `ERC20` transfer test fails with "Insufficient balance" despite storage showing correct balance value. Yet, during the transfer execution, it behaved as if the sender didn’t have enough tokens (broke, but that wasn't the case)
 
 ```rust
 evm = evm.commit(false);
@@ -30,7 +30,7 @@ assert_eq!(info.ret, true.to_bytes32(), "{info:?}");
 
 ## Debugging: Chasing the Stack Ghost
 
-In an attempt to trace this issue, I added debug prints at some points in the test and the process of doing this I noticed a bug in `_update`'s logic:
+In an attempt to trace this issue, I added debug prints at some points in the test and in the process of doing this I noticed a bug in `_update`'s logic:
 ```rust
 if to.eq(Address::empty()) {
     TotalSupply::set(TotalSupply::get().sub(value));
@@ -54,7 +54,7 @@ if from.eq(Address::empty()) {
 DebugEvent::TestLog(U256::from(99)).emit();
 ```
 
-The bug wasn’t “insufficient balance” (that was a misread)—it was a stack underflow when `_update` returned to `_transfer`. `_transfer` expects a bool (`SP = 1`), but `_update` was leaving `SP = 0`, tanking at `call_retur`n’s `_jump()`. So I traced it to the else branch not setting up a return value, unlike linear flows that implicitly worked (straight up logic without if-else, just if branch worked too).
+The bug wasn’t “Insufficient balance” (that was a misread)—it was a stack underflow when `_update` returned to `_transfer`. `_transfer` expects a bool (`SP = 1`), but `_update` was leaving `SP = 0`, tanking at `call_return`’s `_jump()`. So I traced it to the else branch not setting up a return value, unlike linear flows that implicitly worked (straight up logic without if-else, just if branch worked too).
 
 I fixed it by updating `call_return` to push 1 for `empty-result` internal calls:
 ```rust
@@ -89,7 +89,7 @@ _ => {
 }
 ```
 
-the `_push1(1)` and `_jump()` worked for `_update`, but for `name()` (a public call with `abi.is_some()`), it added an extra jump that broke the `main_return` flow (`RETURN` for string data). Reverting to the old version fixed `name()`:
+The `_push1(1)` and `_jump()` worked for `_update`, but for `name()` (a public call with `abi.is_some()`), It added an extra jump that broke the `main_return` flow (`RETURN` for string data). Reverting to the old version fixed `name()`:
 ```rust
 _ => {
     self.table.label(frame.original_pc_offset, self.masm.pc());
@@ -97,7 +97,7 @@ _ => {
     Ok(())
 }
 ```
-now `name()` returns `"The Zink Language"` again, but `_transfer`’s hitting `InvalidJump (ret: [] instead of [..., 1] at erc20.rs:295:9)`. the stack’s fine `(SP = 1 from call_return)`, but the jump target’s off `call_return`’s `_jump()` isn’t landing at `_transfer`’s return point. the jump table’s `original_pc_offset` isn’t syncing right I suppose
+Now `name()` returns `"The Zink Language"` again, but `_transfer`’s hitting `InvalidJump (ret: [] instead of [..., 1] at erc20.rs:295:9)`. The stack’s fine `(SP = 1 from call_return)`, but the jump target’s off `call_return`’s `_jump()` isn’t landing at `_transfer`’s return point. The jump table’s `original_pc_offset` isn’t syncing right I suppose.
 
 I asked Tianyi about this and he said "...it could be caused by our mock of stack usage in compilation". so he opened [Issue #324](https://github.com/zink-lang/zink/issues/324) and decided that we tackle that first. He also pointed to Huff’s dispatching docs—stack outputs like takes (1) returns (1)—and suggested tests. In response to this, I wrote `tests/stack.rs` for `if-else`, `loops`, and `calls`.
 
@@ -105,7 +105,7 @@ I asked Tianyi about this and he said "...it could be caused by our mock of stac
 
 Here’s what I’ve tried to stabilize the stack:
 
-Fix 1: Tweak Internal Calls
+- Fix 1: Tweak Internal Calls
 In visitor/call.rs, I cut the initial increment_sp(1) in call_internal and adjusted SP post-call:
 ```rust
 let current_sp = self.masm.sp();
@@ -117,7 +117,7 @@ if current_sp < *results as u16 {
 }
 ```
 
-Fix 2: Enforce Stack at _end
+- Fix 2: Enforce Stack at _end
 In visitor/control.rs, I made _end check SP against returns:
 
 ```rust
